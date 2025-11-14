@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-detection-inference
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: inference
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: inference
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: inference
+    spec:
+      imagePullSecrets:
+      - name: ngc-secret
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      containers:
+      - name: triton
+        image: nvcr.io/nvidia/tritonserver:25.04-py3
+        command:
+        - tritonserver
+        args:
+        - --model-repository=/models/python_backend_model_repository
+        - --exit-timeout-secs=6000
+        - --http-port=8005
+        - --grpc-port=8006
+        - --metrics-port=8007
+        ports:
+        - name: http
+          containerPort: 8005
+          protocol: TCP
+        - name: grpc
+          containerPort: 8006
+          protocol: TCP
+        - name: metrics
+          containerPort: 8007
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /v2/health/live
+            port: 8005
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /v2/health/ready
+            port: 8005
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: fraud-detection-models

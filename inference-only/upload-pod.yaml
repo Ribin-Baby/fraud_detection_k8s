@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-uploader
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: upload
+spec:
+  restartPolicy: Never
+  containers:
+  - name: uploader
+    image: busybox:latest
+    command: ["sleep", "3600"]
+    volumeMounts:
+    - name: models
+      mountPath: /models
+  volumes:
+  - name: models
+    persistentVolumeClaim:
+      claimName: fraud-detection-models
