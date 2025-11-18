@@ -25,10 +25,10 @@ def install_package(package, version=None):
         print(f"Installation of {package_spec} finished!")
 
 
-install_package("torch", "2.6.0")
-install_package("torch-geometric", "2.6.0")
-install_package("xgboost", "2.1.4")
-install_package("captum", "0.7.0")
+#install_package("torch", "2.6.0")
+#install_package("torch-geometric", "2.6.0")
+#install_package("xgboost", "2.1.4")
+#install_package("captum", "0.7.0")
 
 
 import json
