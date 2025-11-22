@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-detection-training-service
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection-training
+    name: fraud-detection-training
+    component: training
+spec:
+  type: ClusterIP
+  selector:
+    app: fraud-detection-training
+    component: training
+  ports:
+  - name: http
+    port: 8002
+    targetPort: 8002
+    protocol: TCP
+  - name: grpc
+    port: 50051
+    targetPort: 50051
+    protocol: TCP
+---
+# OpenShift Route for external access (preferred over NodePort)
+# apiVersion: route.openshift.io/v1
+# kind: Route
+# metadata:
+#   name: fraud-detection-training-route
+#   namespace: fraud-detection
+#   labels:
+#     app: fraud-detection-training
+#     name: fraud-detection-training
+#     component: training
+# spec:
+#   to:
+#     kind: Service
+#     name: fraud-detection-training-service
+#     weight: 100
+#   port:
+#     targetPort: http
+#   tls:
+#     termination: edge
+#     insecureEdgeTerminationPolicy: Redirect
+#   wildcardPolicy: None

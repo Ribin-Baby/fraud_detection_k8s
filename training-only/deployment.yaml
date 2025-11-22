@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-detection-training
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection-training
+    component: training
+   
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: fraud-detection-training
+      component: training
+  template:
+    metadata:
+      labels:
+        app: fraud-detection-training
+        component: training
+    spec:
+     
+      imagePullSecrets:
+        - name: ngc-secret
+      # Node selector for GPU nodes
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+     
+      containers:
+      - name: training-server
+        image: nvcr.io/nvidia/cugraph/financial-fraud-training:1.0.1
+        imagePullPolicy: IfNotPresent
+        workingDir: /tmp
+       
+        # Resource requests and limits
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+       
+        # Environment variables
+        env:
+        - name: NIM_HTTP_API_PORT
+          value: "8002"
+        - name: NIM_GRPC_API_PORT
+          value: "50051"
+        - name: NIM_DISABLE_MODEL_DOWNLOAD
+          value: "True"
+        - name: NGC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ngc-api-key
+              key: NGC_API_KEY
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: RMM_LOG_FILE
+          value: "rmm_log.txt"
+       
+        # Ports
+        ports:
+        - name: http
+          containerPort: 8002
+          protocol: TCP
+        - name: grpc
+          containerPort: 50051
+          protocol: TCP
+       
+        # Volume mounts
+        volumeMounts:
+        - name: data-volume
+          mountPath: /data
+        - name: models-volume
+          mountPath: /trained_models
+          readOnly: False
+        - name: rmm-log
+          mountPath: /rmm
+       
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /v1/health/live
+            port: 8002
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+       
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /v1/health/ready
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+     
+      # Volumes
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: fraud-detection-data
+      - name: models-volume
+        persistentVolumeClaim:
+          claimName: fraud-detection-models
+      - name: rmm-log
+        emptyDir: {}
+ 
+     
+      # Restart policy
+      restartPolicy: Always

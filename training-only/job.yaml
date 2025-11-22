@@ -1,0 +1,165 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fraud-detection-training-job
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection-training
+    job-type: model-training
+    app.kubernetes.io/name: fraud-detection-training
+    app.kubernetes.io/component: training-job
+spec:
+  # Number of times to retry if job fails
+  backoffLimit: 2
+  
+  # Time to keep completed job (for debugging)
+  ttlSecondsAfterFinished: 86400  # 24 hours
+  
+  template:
+    metadata:
+      labels:
+        app: fraud-detection-training
+        job-type: model-training
+    spec:
+      # OpenShift: Service account
+      serviceAccountName: default
+      
+      imagePullSecrets:
+        - name: docker-registry-secret
+      
+      # OpenShift: Security context for pod
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Node selector for GPU nodes
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      
+      # Tolerations for GPU nodes
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: PreferNoSchedule
+      
+      # Init container to check data availability
+      initContainers:
+      - name: check-data
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+          - |
+            echo "Checking if data is available..."
+            if [ ! -d "/data/TabFormer/gnn" ]; then
+              echo "ERROR: Training data not found at /data/TabFormer/gnn"
+              exit 1
+            fi
+            echo "Data check passed!"
+        volumeMounts:
+        - name: data-volume
+          mountPath: /data
+      
+      containers:
+      - name: training-job
+        image: nvcr.io/nvidia/cugraph/financial-fraud-training:1.0.1
+        imagePullPolicy: IfNotPresent
+        
+        # OpenShift: Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - ALL
+        
+        # Command to run training
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            echo "Starting training job..."
+            echo "Waiting for training server to be ready..."
+            sleep 10
+            
+            # Trigger training via API
+            curl -X POST "http://localhost:8002/train" \
+              -H "Content-Type: application/json" \
+              -d @/config/training_config.json
+            
+            # Wait for training to complete
+            echo "Training triggered. Monitoring progress..."
+            
+            # Poll for completion (adjust timeout as needed)
+            TIMEOUT=7200  # 2 hours
+            ELAPSED=0
+            INTERVAL=30
+            
+            while [ $ELAPSED -lt $TIMEOUT ]; do
+              # Check if training is complete by looking for output files
+              if [ -f "/trained_models/python_backend_model_repository/prediction_and_shapley/1/model.py" ]; then
+                echo "Training completed successfully!"
+                exit 0
+              fi
+              
+              echo "Training in progress... ($ELAPSED/$TIMEOUT seconds)"
+              sleep $INTERVAL
+              ELAPSED=$((ELAPSED + INTERVAL))
+            done
+            
+            echo "Training timeout reached!"
+            exit 1
+        
+        # Resource requests and limits
+        resources:
+          requests:
+            memory: "16Gi"
+            cpu: "4"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "32Gi"
+            cpu: "8"
+            nvidia.com/gpu: "1"
+        
+        # Environment variables
+        env:
+        - name: NIM_HTTP_API_PORT
+          value: "8002"
+        - name: NIM_GRPC_API_PORT
+          value: "50051"
+        - name: NIM_DISABLE_MODEL_DOWNLOAD
+          value: "True"
+        - name: NGC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ngc-api-key
+              key: NGC_API_KEY
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        
+        # Volume mounts
+        volumeMounts:
+        - name: data-volume
+          mountPath: /data
+        - name: models-volume
+          mountPath: /trained_models
+        - name: training-config
+          mountPath: /config
+          readOnly: true
+      
+      # Volumes
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: fraud-detection-data-pvc
+      - name: models-volume
+        persistentVolumeClaim:
+          claimName: fraud-detection-models-pvc
+      - name: training-config
+        configMap:
+          name: training-config
+      
+      # Restart policy for jobs
+      restartPolicy: OnFailure
