@@ -182,16 +182,32 @@ class SingleTransactionInference:
         self,
         raw_transaction: Dict,
         compute_shap: bool = False,
-        feature_mask: Optional[np.ndarray] = None,
         decision_threshold: float = 0.5
     ) -> Dict: 
 
         record_dict = raw_transaction
+        # compute feature mask
+        features = list(raw_transaction.keys())
+        mask_mapping = {}
+        feature_mask = []
+        current_group_id = 0
+        prv_label = ""
+        for f in features:
+            label = f.split("_")[0]
+            
+            # print(label, prv_label)
+            if label!=prv_label:
+                current_group_id+=1
+            feature_mask.append(current_group_id)
+            mask_mapping[label]=current_group_id
+            prv_label = label
+        
         # print("Record dict:", record_dict)
         edges, nodes, labels = self.convert_single(record_dict)
         edge_index = edges.values.T.astype(np.int64)
         node_features = nodes.to_numpy()
-
+        compute_shap = np.array([compute_shap], dtype=bool)
+    
         # Step 3: Prepare inputs for Triton
         input_features = httpclient.InferInput(
             "NODE_FEATURES",
@@ -216,7 +232,8 @@ class SingleTransactionInference:
         compute_shap_flag.set_data_from_numpy(np.array([compute_shap], dtype=bool))
 
         if compute_shap and feature_mask is not None:
-            feature_mask_input = feature_mask.astype(np.int32)
+            assert nodes.shape[1] == len(feature_mask)
+            feature_mask_input = np.array(feature_mask).astype(np.int32)
         else:
             feature_mask_input = np.zeros(nodes.shape[1], dtype=np.int32)
 
@@ -245,11 +262,19 @@ class SingleTransactionInference:
         # Step 5: Extract results
         prediction = response.as_numpy('PREDICTION')
         y_pred = (prediction > decision_threshold).astype('int8')
+        if compute_shap:
+            shap_values = response.as_numpy('SHAP_VALUES')
+            # print("SHAP values shape:", shap_values.shape)
+            feature_to_attribution_map = dict(zip(feature_mask, shap_values[2]))
+            feature_name_to_id_map = {v:k for k, v in mask_mapping.items()}
+            shap_to_features = {feature_name_to_id_map[k]: f"{v:.3f}" for k, v in feature_to_attribution_map.items()}
+
         # return (prediction[-1, 0], y_pred[-1, 0])
         result = {
             'fraud_probability': prediction[-1, 0],
             'is_fraud': y_pred[-1, 0],
-            'decision_threshold': decision_threshold
+            'decision_threshold': decision_threshold,
+            'shap_values': shap_to_features if compute_shap else None,
         }
         return result
 
@@ -272,7 +297,7 @@ if __name__ == "__main__":
     raw_transaction = {'User': 0, 'Card': 0, 'Year': 2019, 'Month': 1, 'Day': 9, 'Time': '10:18', 'Amount': '$59.17', 'Use Chip': 'Chip Transaction', 'Merchant Name': -4693979874497918566, 'Merchant City': 'North Grafton', 'Merchant State': 'MA', 'Zip': 1536.0, 'MCC': 7538, 'Errors?': 'XX', 'Is Fraud?': 'No', 'Fraud': 0}
     # Predict
     result = inference_client.predict_single_transaction(
-        raw_transaction
+        raw_transaction, compute_shap=True
     )
 
     print(f"Fraud Probability: {result['fraud_probability']:.4f}")
