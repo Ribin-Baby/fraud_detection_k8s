@@ -230,7 +230,7 @@ class SingleTransactionInference:
             (1,),
             datatype="BOOL"
         )
-        compute_shap_flag.set_data_from_numpy(np.array([compute_shap], dtype=bool))
+        compute_shap_flag.set_data_from_numpy(compute_shap)
 
         if compute_shap and feature_mask is not None:
             assert nodes.shape[1] == len(feature_mask)
