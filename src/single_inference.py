@@ -186,8 +186,15 @@ class SingleTransactionInference:
     ) -> Dict: 
 
         record_dict = raw_transaction
+        
+        # print("Record dict:", record_dict)
+        edges, nodes, labels = self.convert_single(record_dict)
+        edge_index = edges.values.T.astype(np.int64)
+        node_features = nodes.to_numpy()
+        compute_shap = np.array([compute_shap], dtype=bool)
+        
         # compute feature mask
-        features = list(raw_transaction.keys())
+        features = list(nodes.columns)
         mask_mapping = {}
         feature_mask = []
         current_group_id = 0
@@ -201,13 +208,7 @@ class SingleTransactionInference:
             feature_mask.append(current_group_id)
             mask_mapping[label]=current_group_id
             prv_label = label
-        
-        # print("Record dict:", record_dict)
-        edges, nodes, labels = self.convert_single(record_dict)
-        edge_index = edges.values.T.astype(np.int64)
-        node_features = nodes.to_numpy()
-        compute_shap = np.array([compute_shap], dtype=bool)
-    
+
         # Step 3: Prepare inputs for Triton
         input_features = httpclient.InferInput(
             "NODE_FEATURES",
